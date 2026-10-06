@@ -1,0 +1,39 @@
+name: Java CI
+
+on:
+  push:
+    branches: [main] # Запускаем сборку только на ветке main
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      # Шаг запуска SUT (сервиса)
+      - name: Start System Under Test in background 🚀
+        run: |
+          echo "Starting app-mbank.jar..."
+          java -jar ./artifacts/app-mbank.jar &> sut.log &
+          echo $! > app.pid
+          sleep 5 && cat sut.log | head -n 20 # Ждём 5 секунд и показываем первые 20 строк лога
+
+      # Основной шаг — прогон тестов
+      - name: Run tests ✅
+        run: |
+          ./gradlew test --no-daemon
+
+      # Остановка сервиса после выполнения всех шагов
+      - name: Stop System Under Test ⛔️
+        if: always()
+        run: |
+          kill $(cat app.pid) || true
