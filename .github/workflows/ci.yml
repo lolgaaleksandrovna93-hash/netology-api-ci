@@ -7,6 +7,7 @@ on:
 
 jobs:
   build:
+    # !!!! ВАЖНО: Заменили ubuntu-latest на windows-latest
     runs-on: windows-latest
 
     steps:
@@ -19,51 +20,18 @@ jobs:
           java-version: '17'
           cache: gradle
 
-      # Запуск SUT (сервиса) в фоновом режиме через PowerShell
-      - name: Start System Under Test in background
-        shell: pwsh
-        run: |
-          Write-Host "Starting app-mbank.jar..."
-          $process = Start-Process -FilePath "java" `
-            -ArgumentList "-jar", "./artifacts/app-mbank.jar" `
-            -RedirectStandardOutput "sut.log" `
-            -RedirectStandardError "sut.err.log" `
-            -PassThru
-          $process.Id | Out-File -FilePath "app.pid"
+      # Этот шаг уже содержит встроенный PowerShell-скрипт,
+      # поэтому мы просто вызываем его без дополнительных команд.
+      - name: Start SUT in background 🚀
+        run: .\start-sut.ps1
 
-          # Ждём, пока приложение поднимет порт (замените 9999 на порт вашего SUT)
-          $port = 9999
-          $timeout = 60
-          $elapsed = 0
-          while ($elapsed -lt $timeout) {
-            try {
-              $client = New-Object Net.Sockets.TcpClient
-              $client.Connect("localhost", $port)
-              $client.Close()
-              Write-Host "SUT is up on port $port"
-              break
-            } catch {
-              Start-Sleep -Seconds 1
-              $elapsed++
-            }
-          }
-          if ($elapsed -ge $timeout) {
-            Get-Content sut.log -ErrorAction SilentlyContinue
-            Get-Content sut.err.log -ErrorAction SilentlyContinue
-            throw "SUT did not start within $timeout seconds"
-          }
-
-      # Основной шаг — прогон тестов (bat-версия, на Windows это родной способ)
-      - name: Run tests
+      # Основной шаг — прогон тестов
+      - name: Run tests ✅
+        # Для совместимости с WSL/Linux используем bat-версию Gradle Wrapper
         run: ./gradlew.bat test --no-daemon
 
       # Остановка сервиса после выполнения всех шагов
-      - name: Stop System Under Test
+      - name: Stop SUT ⛔️
         if: always()
-        shell: pwsh
         run: |
-          if (Test-Path "app.pid") {
-            $pidValue = Get-Content "app.pid"
-            Stop-Process -Id $pidValue -Force -ErrorAction SilentlyContinue
-            Write-Host "SUT stopped"
-          }
+          kill $(cat app.pid) || true
