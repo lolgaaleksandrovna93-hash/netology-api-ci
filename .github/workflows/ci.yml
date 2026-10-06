@@ -30,7 +30,8 @@ jobs:
       # Основной шаг — прогон тестов
       - name: Run tests ✅
         run: |
-          ./gradlew test --no-daemon
+          # Используем bat-версию для кросс-платформенности
+          ./gradlew.bat test --no-daemon
 
       # Остановка сервиса после выполнения всех шагов
       - name: Stop System Under Test ⛔️
