@@ -2,12 +2,12 @@ name: Java CI
 
 on:
   push:
-    branches: [main] # Запускаем сборку только на ветке main
+    branches: [main]
   pull_request:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
 
     steps:
       - uses: actions/checkout@v4
@@ -19,22 +19,51 @@ jobs:
           java-version: '17'
           cache: gradle
 
-      # Шаг запуска SUT (сервиса)
-      - name: Start System Under Test in background 🚀
+      # Запуск SUT (сервиса) в фоновом режиме через PowerShell
+      - name: Start System Under Test in background
+        shell: pwsh
         run: |
-          echo "Starting app-mbank.jar..."
-          java -jar ./artifacts/app-mbank.jar &> sut.log &
-          echo $! > app.pid
-          sleep 5 && cat sut.log | head -n 20 # Ждём 5 секунд и показываем первые 20 строк лога
+          Write-Host "Starting app-mbank.jar..."
+          $process = Start-Process -FilePath "java" `
+            -ArgumentList "-jar", "./artifacts/app-mbank.jar" `
+            -RedirectStandardOutput "sut.log" `
+            -RedirectStandardError "sut.err.log" `
+            -PassThru
+          $process.Id | Out-File -FilePath "app.pid"
 
-      # Основной шаг — прогон тестов
-      - name: Run tests ✅
-        run: |
-          # Используем bat-версию для кросс-платформенности
-          ./gradlew.bat test --no-daemon
+          # Ждём, пока приложение поднимет порт (замените 9999 на порт вашего SUT)
+          $port = 9999
+          $timeout = 60
+          $elapsed = 0
+          while ($elapsed -lt $timeout) {
+            try {
+              $client = New-Object Net.Sockets.TcpClient
+              $client.Connect("localhost", $port)
+              $client.Close()
+              Write-Host "SUT is up on port $port"
+              break
+            } catch {
+              Start-Sleep -Seconds 1
+              $elapsed++
+            }
+          }
+          if ($elapsed -ge $timeout) {
+            Get-Content sut.log -ErrorAction SilentlyContinue
+            Get-Content sut.err.log -ErrorAction SilentlyContinue
+            throw "SUT did not start within $timeout seconds"
+          }
+
+      # Основной шаг — прогон тестов (bat-версия, на Windows это родной способ)
+      - name: Run tests
+        run: ./gradlew.bat test --no-daemon
 
       # Остановка сервиса после выполнения всех шагов
-      - name: Stop System Under Test ⛔️
+      - name: Stop System Under Test
         if: always()
+        shell: pwsh
         run: |
-          kill $(cat app.pid) || true
+          if (Test-Path "app.pid") {
+            $pidValue = Get-Content "app.pid"
+            Stop-Process -Id $pidValue -Force -ErrorAction SilentlyContinue
+            Write-Host "SUT stopped"
+          }
