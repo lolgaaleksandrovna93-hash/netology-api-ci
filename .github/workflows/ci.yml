@@ -19,7 +19,8 @@ jobs:
           java-version: '17'
           cache: gradle
 
-      - name: Start SUT in background
+      # SUT живёт только внутри этого шага, поэтому старт, ожидание и тесты — вместе
+      - name: Run tests with SUT
         shell: pwsh
         run: |
           $process = Start-Process -FilePath "java" `
@@ -27,7 +28,6 @@ jobs:
             -RedirectStandardOutput "sut.log" `
             -RedirectStandardError "sut.err.log" `
             -PassThru
-          $process.Id | Out-File -FilePath "app.pid"
 
           $port = 9999
           $timeout = 60
@@ -47,20 +47,18 @@ jobs:
           if ($elapsed -ge $timeout) {
             Get-Content sut.log -ErrorAction SilentlyContinue
             Get-Content sut.err.log -ErrorAction SilentlyContinue
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
             throw "SUT did not start within $timeout seconds"
           }
 
-      - name: Run tests
-        run: ./gradlew.bat test --no-daemon
+          ./gradlew.bat test --no-daemon
+          $testsFailed = ($LASTEXITCODE -ne 0)
 
-      - name: Stop SUT
-        if: always()
-        shell: pwsh
-        run: |
-          if (Test-Path "app.pid") {
-            $sutPid = Get-Content "app.pid"
-            Stop-Process -Id $sutPid -Force -ErrorAction SilentlyContinue
-            Write-Host "SUT stopped"
-          } else {
-            Write-Host "No app.pid found — nothing to stop"
-          }
+          Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+
+          Write-Host "=== sut.log ==="
+          Get-Content sut.log -ErrorAction SilentlyContinue
+          Write-Host "=== sut.err.log ==="
+          Get-Content sut.err.log -ErrorAction SilentlyContinue
+
+          if ($testsFailed) { exit 1 }
